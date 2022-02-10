@@ -1,0 +1,49 @@
+version: "3"
+
+services:
+  mongo:
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    image: mongo:3.4
+    
+  core:
+    container_name: openhim-core
+    image: jembi/openhim-core
+    environment:
+      - mongo_url=mongodb://mongo/openhim
+      - mongo_atnaUrl=mongodb://mongo/openhim
+    ports:
+      - "8080:8080"
+      - "5000:5000"
+      - "5001:5001"
+      - "5050:5050"
+      - "5051:5051"
+      - "5052:5052"
+      - "7788:7788"
+    depends_on:
+      - mongo
+  
+  openhim-console:
+    container_name: openhim-console
+    image: jembi/openhim-console:latest
+    # restart: unless-stopped
+    ports:
+      - "9000:80"
+    healthcheck:
+     test: "curl -sS http://openhim-console || exit 1"
+     interval: 30s
+     timeout: 30s
+     retries: 3
+  
+  paymentmediators:
+    container_name: payment-mediators
+    build:
+      context: .
+    entrypoint:  /home/appuser/mediators/entrypoint.sh
+    ports:
+      - "9002:9002"
+    volumes:
+      - ./openhim-mifos-mediator-dkr:/mediatorstorage                                             
+
+
