@@ -86,7 +86,7 @@ def getClient(request):
 
 		except ValueError:
 			 pass
-		
+	
 		return Response(payload)
 	
 	elif request.method == 'POST':
