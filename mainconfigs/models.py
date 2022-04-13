@@ -5,8 +5,8 @@ Model for making is earsier to change the base URls for openIMIS.
 openHIM and the mediators.
 
 The the upstream server urls for openHIM, openIMIS and mediators 
-For more information on this file, contact the Python developers
-Stephen Mburu:ahoazure@gmail.com & Peter Kaniu:peterkaniu254@gmail.com
+For more information on this file, contact the Python developer
+Stephen Mburu:ahoazure@gmail.com
 
 """
 
@@ -32,6 +32,7 @@ class configs(models.Model):
     # Server and authetication variables for connecting to openHIM server
     openhim_url = models.CharField(max_length=200,validators=[url_regex],
         verbose_name='OpenHIM URL') #base url
+    openhim_port = models.IntegerField(verbose_name='OpenHIM Port',default=8080)
     openhim_user = models.CharField(max_length=200,verbose_name='Username') #auth user
     openhim_passkey = models.CharField(max_length=200,verbose_name='Password') #auth pass
 

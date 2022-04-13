@@ -1,0 +1,16 @@
+[
+    {
+        "groupmifosurl":"fineract-provider/api/v1/groups"
+    },
+    {
+        "invoiceurl":"fineract-provider/api/v1/savingsaccounts",
+        "id": "13",
+        "action":"transactions"
+    },
+    {
+        "orgurl":"fineract-provider/api/v1/clients"
+    },
+    {
+        "patientmifosurl":"fineract-provider/api/v1/clients"
+    }
+]

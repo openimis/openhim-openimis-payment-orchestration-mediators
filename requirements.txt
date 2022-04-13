@@ -5,3 +5,4 @@ git+https://github.com/de-laz/openhim-mediator-utils-py
 djangorestframework == 3.10.3
 django-import-export
 APScheduler==3.8.1
+python-dotenv<=0.17.1

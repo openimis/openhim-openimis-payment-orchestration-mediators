@@ -24,17 +24,31 @@ import http.client
 
 import urllib3
 import requests
+import re # import regular expression to strip off https in mediators host
+
 from datetime import date
 from datetime import datetime
 from openhim_mediator_utils.main import Main
 from time import sleep
 import json
 
+from .models import Person # import person model class
+
 from mainconfigs.models import configs
 from mainconfigs.views import configview
 import http.client
 import base64
 
+import os # necessary for accessing filesystem from current project
+import dotenv # necessary for reading .env config files in .config
+
+
+# Import .env variables before assiging the values to the BASE_URL in home directory
+# Prints '/home/stepcloud/openIMIS/Backends/openimis-payment-mediator_dkr/.conf/.env'
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dotenv_file = os.path.join(BASE_DIR, ".conf/.env")
+if os.path.isfile(dotenv_file):
+    dotenv.load_dotenv(dotenv_file)
 
 @api_view(['GET', 'POST'])
 def getClient(request):
@@ -54,8 +68,7 @@ def getClient(request):
 	"""	
 
 	if request.method == 'GET':
-		openimisurl = configurations["data"]["openimis_url"]+"/api/api_fhir_r4/Patient"
-		# import pdb; pdb.set_trace()	
+		openimisurl = configurations["data"]["openimis_url"]+str(os.environ['PATIENT'])
 		querystring = {"":""}
 		payload = "Nothing to Show!"
 		headers = { # modified headers to pass tenant header specific to MIFOS
@@ -64,21 +77,36 @@ def getClient(request):
 			'Fineract-Platform-TenantId':'default',
 			} 
 
-		# to by-pass self-signed certificate, add verify=false in the response parameters 
+		# By-pass self-signed certificate, add verify=false in the response parameters 
 		response = requests.request("GET", openimisurl, data=payload, headers=headers, params=querystring,verify=False) #by-pass Cert verificartion
+
 		try: # this try block captures JSON decode exception caused by invalid API endpoint
 			json_data = json.loads(response.text) # Convert string into JSON object to facilitate selecting dataset to be rendered
 			payload = json_data # returns raw data retrieved from openIMIS			
+
 		except ValueError:
 			 pass
-		
+	
 		return Response(payload)
 	
 	elif request.method == 'POST':
 		mifosauth = configurations["data"]["mifos_user"]+":"+configurations["data"]["mifos_passkey"]
 		tenant = configurations["data"]["mifos_tenant"]
-		mifosurl = configurations["data"]["mifos_url"]+"/fineract-provider/api/v1/clients" #mifos endpoint
-   
+		baseurl = configurations["data"]["mifos_url"]
+	
+		try: # attempt opening the default config json file from hidden conf directory
+			params = json.loads(open('.conf/PathParameters.json').read())			
+			response = requests.get(baseurl+'/{patientmifosurl}'.format_map(
+				params[3]),verify=False) # get resource uri from 2nd array in .conf/PathParaheters.json
+		except (FileNotFoundError,IOError) as e: # else bypass import and use django admin
+			pass
+
+		mifosurl = response.url #mifos endpoint
+		clienturl = response.url+f"?fields={os.environ['CLIENTQUERYLIST']}" # use f to allow comma seperate list on URL
+		
+		# import pdb; pdb.set_trace()	
+
+
 		# Encode openIMIS user credentials using Base64 Encoding scheme
 		encodedBytes = base64.b64encode(mifosauth.encode("utf-8"))
 		encodedStr = str(encodedBytes, "utf-8")
@@ -89,12 +117,12 @@ def getClient(request):
 			data_dict = json.loads(data) # Convert JSON into Python Dict
 			
 			keymap = {  # openIMIS Patient to MIFOS Client mapping dictionary
-						'id':'externalId',
-						'name':'fullname',
-						'given':'firstname',
-						'family':'lastname',
-						'use':'official'
-						}
+					'id':'externalId',
+					'name':'fullname',
+					'given':'firstname',
+					'family':'lastname',
+					'use':'official'
+			}
 
 			"""
 			The following statemements are responsible for calling transformations recursive functions responsible for mapping FHIR R4
@@ -111,7 +139,13 @@ def getClient(request):
 				'Content-Type': "application/json",
 				'Fineract-Platform-TenantId':tenant,
 				}
+
+			# Fetch the clients data from Mifos and filter the display to only get necessary fields
+			clients_data = requests.request("GET", clienturl, data=request.data, headers=headers, params=querystring,verify=False)
+			clients_data = json.loads(clients_data.text) # extract the payload part of the response
+			clients_data = mediators_save_clients(clients_data)	# call this method that save the json payload into the database
 			
+			# Send (post) the transformed payload into mifos system			
 			response = requests.request("POST", mifosurl, data=payload, headers=headers, params=querystring,verify=False)			
 			data_dict = json.loads(response.text) # assign response data to python dictionary
 		except ValueError:
@@ -126,7 +160,9 @@ and the transforms the OpenIMIS attributes to match those defined in MIFOS clien
 Check on https://www.youtube.com/watch?v=1vrQIdMF4LY to develop apscheduler that may be used to
 post GET response to our MIFOS database using this transformation function
 """
+
 def transform_merged_subdictionaries(data_dict):
+    chained_dict = {}
     def update_name_list(lst): # extract  valued fron the dictionary list
         dct = {}
         for item in lst:
@@ -148,7 +184,6 @@ def transform_merged_subdictionaries(data_dict):
             """
             Remove the following attributes from the payload coz they are not supported by MIFOS
             """
-			
             data_dict.pop(k) #remove the name dictionary list from transformed payload
             # data_dict['dateOfBirth'] = data_dict.pop('birthDate') #transform date of birth
 
@@ -177,12 +212,11 @@ def transform_merged_subdictionaries(data_dict):
                data_dict[key_to_lookup][0].pop('extension')
                data_dict[key_to_lookup][0].pop('use')	
                data_dict[key_to_lookup][0].pop('type')	
-               data_dict[key_to_lookup][0].pop('text')	  
+               data_dict[key_to_lookup][0]['street']=data_dict[key_to_lookup][0].pop('text')	  
                data_dict[key_to_lookup][0].pop('city') 
                data_dict[key_to_lookup][0].pop('district')
                data_dict[key_to_lookup][0].pop('state')
                data_dict[key_to_lookup][0]['addressTypeId']=1
-            #    data_dict[key_to_lookup][0]['street']='Nairobi'
 
             key_to_lookup = 'photo'
             if key_to_lookup in data_dict:
@@ -243,16 +277,34 @@ def replace_keys(data_dict, key_dict):
         return new_dict	
     return new_dict
 
+# This function creates  clients database table for integrity checks only
+def mediators_save_clients(clients_data): 
+	for child in clients_data['pageItems']: #iterate to display all objects in the json array
+		person = Person.objects.update_or_create(
+			id = child['id'],					
+			externalID = child['externalId'],
+			fullname = child['displayName'],
+		)
+	return person
+
 	
 def registerClientMediator():
 	result = configview()
 	configurations = result.__dict__
 	try: 
-		# allow the app to run even if the mediator has noy been registered 
-		API_URL = configurations["data"]["openhim_url"]
-		
-		# import pdb; pdb.set_trace()
+		# allow the app to run even if the mediator has not been registered with openhim		
+		API_PORT = configurations["data"]["openhim_port"]
+		if API_PORT is not None and 'localhost' in configurations["data"]["openhim_url"]: # check whether the port value is provided for localhost
+			API_URL = configurations["data"]["openhim_url"]+":"+str(configurations["data"]["openhim_port"])
+		else:
+			API_URL = configurations["data"]["openhim_url"]
 
+		MEDIATOR_URL = configurations["data"]["mediator_url"]
+		if MEDIATOR_URL is not None: # check whether the mediator URL is provided and remove scheme
+			host = re.sub(r'^https?:\/\/', '', MEDIATOR_URL)
+		else:
+			host='localhost'
+		
 		USERNAME = configurations["data"]["openhim_user"]
 		PASSWORD = configurations["data"]["openhim_passkey"]
 
@@ -266,7 +318,7 @@ def registerClientMediator():
 		}
 
 		conf = {
-		"urn": "urn:mediator:openhim-mediator-python-mifos-Client",
+		"urn": "urn:mediator:openhim-mediator-python-mifos-clients",
 		"version": "1.0.1",
 		"name": "FHIR R4 Patient Mediator",
 		"description": "Python Fhir R4 Client Mediator",
@@ -278,7 +330,7 @@ def registerClientMediator():
 				"routes": [
 					{
 						"name": "FHIR R4 Client Mediator Route",
-						"host": configurations["data"]["mediator_url"],
+						"host": host,
 						"path": "/fineract-provider/api/v1/clients",
 						"port": configurations["data"]["mediator_port"],
 						"primary": True,
@@ -294,7 +346,7 @@ def registerClientMediator():
 		"endpoints": [
 			{
 				"name": "Patient FHIR R4 Mediator",
-				"host": configurations["data"]["mediator_url"],
+				"host": host,
 				"path": "/fineract-provider/api/v1/clients",
 				"port": configurations["data"]["mediator_port"],
 				"primary": True,
@@ -306,7 +358,7 @@ def registerClientMediator():
 			options=options,
 			conf=conf
 			)
-		openhim_mediator_utils.register_mediator() # Register python mediator with openHIM core 
+		openhim_mediator_utils.register_mediator() # Register python mediator with core 
 		checkHeartbeat(openhim_mediator_utils) # Monitor mediator health on the console
 	except ConnectionError:
 		pass
